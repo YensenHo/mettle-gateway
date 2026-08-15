@@ -134,7 +134,17 @@
 
 ---
 
-## 七、📚 来源
+## 七、🤝 决策协作流程（Collaboration Protocol）
+
+### C1 — 有问题先和 Codex 商量，最后再问用户
+- **什么**：遇到需要决策的问题（方向选择、方案取舍、争议点），先派 Codex（`delegate_task` 扮演工程角色，或 `codex CLI`）辩论/出意见，收敛出结论后，再向用户提「收敛后的方案 + 明确选项」。
+- **为什么**：Hermes 是商业大脑、Codex 是工程大脑，辩论逼出更锋利的结论；用户要的是收敛后的决策，不是开放式提问（用户指令 2026-08-15）。
+- **验证**：任何需要用户拍板的决策，交付前必须先有一轮 Codex 的反驳/意见记录（delegate 结果或 bridge inbox）。
+- **例外**：紧急 bug 修复、用户已授权「直接执行」的机械操作，可不经辩论直接做。
+
+---
+
+## 八、📚 来源
 
 - 调研报告：`~/ai-token-marketplace-research.md`（2026-08-10，VMCO/OpenRouter/中转站）
 - B 线「卖水人」调研：delegation `deleg_cc73722c`（2026-08-15，gh CLI + 直连抓取 CCTest/Veridrop/RelayRadar/QuotaBall）
