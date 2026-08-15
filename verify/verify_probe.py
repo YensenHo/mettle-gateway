@@ -14,7 +14,9 @@ Mettle Verify — 余额真实性验证探针 (V1)
 """
 import argparse
 import json
+import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -69,19 +71,26 @@ def normalize_base_url(base_url):
     return url + "/v1/chat/completions"
 
 
-def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60) -> tuple[int | None, dict]:
+def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, retries: int = 5) -> tuple[int | None, dict]:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {api_key}")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")
-        return e.code, {"error": body[:500]}
-    except urllib.error.URLError as e:
-        return None, {"error": f"网络错误: {e.reason}"}
+    last_err = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", f"Bearer {api_key}")
+            req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            if e.code in (401, 404):  # 明确失败不重试
+                return e.code, {"error": body[:500]}
+            last_err = e  # 403 等可能是 GFW 间歇干扰，重试
+        except (urllib.error.URLError, ssl.SSLError, TimeoutError) as e:
+            last_err = e
+        time.sleep(1.5 * (attempt + 1))  # 指数退避
+    return None, {"error": f"网络错误(重试{retries}次后): {last_err}"}
 
 
 # ── 主流程 ─────────────────────────────────────────────
@@ -113,6 +122,8 @@ def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: flo
     reasonable = compute_reasonable_cost(price, prompt_tokens, completion_tokens, ratio, fx)
     actual = before - after
     level, note = judge(actual, reasonable)
+    if reasonable < 0.05:  # 单次扣费太小，余额显示精度可能放大误差
+        note += "（⚠️ 单次扣费过小，余额显示精度可能放大误差，建议发更大请求或多次累计）"
 
     return {
         "model": model,

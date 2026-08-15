@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mettle Verify · 中转站余额真实性验证</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;background:#0a0e14;color:#e0e6ed;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:32px 16px}
+.wrap{width:100%;max-width:640px}
+.header{text-align:center;margin-bottom:28px}
+.header h1{font-size:26px;font-weight:700;letter-spacing:-0.5px}
+.header h1 .bolt{color:#fbbf24}
+.header .sub{color:#64748b;font-size:13px;margin-top:6px}
+.card{background:#111827;border:1px solid #1f2937;border-radius:14px;padding:24px;margin-bottom:16px}
+.card h2{font-size:15px;font-weight:600;color:#94a3b8;margin-bottom:16px;letter-spacing:0.3px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:#64748b;margin-bottom:5px}
+.field input{width:100%;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:10px 12px;color:#e0e6ed;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;outline:none;transition:border .15s}
+.field input:focus{border-color:#3b82f6}
+.field .hint{font-size:11px;color:#475569;margin-top:4px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{width:100%;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.92}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.result{display:none;border-radius:14px;padding:22px;margin-bottom:16px}
+.result.ok{display:block;background:#0c1a12;border:1px solid #14532d}
+.result.warn{display:block;background:#1a1408;border:1px solid #713f12}
+.result.fail{display:block;background:#1a0c0e;border:1px solid #7f1d1d}
+.result.err{display:block;background:#131313;border:1px solid #3f3f46}
+.result .verdict{font-size:20px;font-weight:700;margin-bottom:10px}
+.result .verdict.ok{color:#4ade80}
+.result .verdict.warn{color:#fbbf24}
+.result .verdict.fail{color:#f87171}
+.result .verdict.err{color:#a1a1aa}
+.result table{width:100%;border-collapse:collapse;font-size:13px}
+.result td{padding:7px 4px;border-bottom:1px solid #1f2937;color:#94a3b8}
+.result td:last-child{text-align:right;color:#e0e6ed;font-family:ui-monospace,monospace}
+.result .note{font-size:12px;color:#64748b;margin-top:10px;line-height:1.5}
+.privacy{text-align:center;color:#475569;font-size:12px;line-height:1.6}
+.privacy b{color:#64748b}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <h1><span class="bolt">⚡</span> Mettle Verify</h1>
+    <div class="sub">中转站余额真实性验证 · 检测是否「余额虚标 / 倍率造假 / 偷偷多扣」</div>
+  </div>
+
+  <div class="card">
+    <h2>🔍 验证你的中转站 key</h2>
+    <div class="field">
+      <label>中转站 API 地址 (base_url)</label>
+      <input id="baseUrl" placeholder="https://www.cun.ai/v1">
+    </div>
+    <div class="field">
+      <label>API Key (sk-...)</label>
+      <input id="apiKey" placeholder="sk-...">
+      <div class="hint">仅用于本次探针请求，不落盘、不存储</div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>模型名</label>
+        <input id="model" placeholder="gpt-4o">
+      </div>
+      <div class="field">
+        <label>宣称倍率</label>
+        <input id="ratio" value="1.0" placeholder="1.0">
+      </div>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>调用前余额</label>
+        <input id="before" placeholder="2.99">
+      </div>
+      <div class="field">
+        <label>调用后余额</label>
+        <input id="after" placeholder="2.98">
+      </div>
+    </div>
+    <div class="field">
+      <label>余额币种汇率</label>
+      <input id="fx" value="1.0" placeholder="1.0">
+      <div class="hint">余额是美元填 1.0，人民币填 7.2</div>
+    </div>
+    <button class="btn" id="runBtn" onclick="runProbe()">验证</button>
+  </div>
+
+  <div class="result" id="result"></div>
+
+  <div class="privacy">
+    <b>隐私承诺</b>：你的 API Key 只用于发出一次探针请求并计算差额，<br>不存储、不落盘、不记日志、不写入数据库。
+  </div>
+</div>
+
+<script>
+async function runProbe() {
+  const btn = document.getElementById('runBtn');
+  const res = document.getElementById('result');
+  const body = {
+    base_url: document.getElementById('baseUrl').value.trim(),
+    api_key: document.getElementById('apiKey').value.trim(),
+    model: document.getElementById('model').value.trim(),
+    ratio: parseFloat(document.getElementById('ratio').value) || 1.0,
+    before: parseFloat(document.getElementById('before').value),
+    after: parseFloat(document.getElementById('after').value),
+    fx: parseFloat(document.getElementById('fx').value) || 1.0,
+  };
+  if (!body.base_url || !body.api_key || !body.model || isNaN(body.before) || isNaN(body.after)) {
+    showError('请填写完整：base_url、api_key、model、前后余额');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '探测中...';
+  res.className = 'result';
+  res.style.display = 'none';
+  try {
+    const r = await fetch('/api/v1/probe', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    renderResult(data, body.fx);
+  } catch (e) {
+    showError('请求失败：' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '验证';
+  }
+}
+
+function unit(fx) { return fx === 1.0 ? '$' : '¥'; }
+
+function renderResult(d, fx) {
+  const res = document.getElementById('result');
+  if (d.error) {
+    res.className = 'result err';
+    res.innerHTML = `<div class="verdict err">❌ 无法判定</div>
+      <div class="note">${escapeHtml(d.error)}</div>`;
+    return;
+  }
+  const level = d.judge_level;
+  const icon = {OK:'✅', WARN:'⚠️', FAIL:'🔴', UNKNOWN:'❓'}[level] || '❓';
+  const cls = level === 'OK' ? 'ok' : level === 'WARN' ? 'warn' : level === 'FAIL' ? 'fail' : 'err';
+  res.className = 'result ' + cls;
+  const u = unit(fx);
+  res.innerHTML = `
+    <div class="verdict ${cls}">${icon} ${level} — ${escapeHtml(d.judge_note)}</div>
+    <table>
+      <tr><td>模型</td><td>${escapeHtml(d.model)} (宣称 ${d.claimed_ratio}x)</td></tr>
+      <tr><td>探针消耗</td><td>${d.prompt_tokens} prompt + ${d.completion_tokens} completion</td></tr>
+      <tr><td>官方价</td><td>${d.official_price_usd_per_1m.input}/${d.official_price_usd_per_1m.output} USD/1M</td></tr>
+      <tr><td>合理扣费</td><td>${u}${d.reasonable_cost_cny}</td></tr>
+      <tr><td>实际扣费</td><td>${u}${d.actual_cost_cny} (${d.before_cny} → ${d.after_cny})</td></tr>
+    </table>
+    <div class="note">判定标准：实际/合理 &lt; 1.1 正常 · 1.1~1.5 疑似多扣 · &gt; 1.5 倍率虚标。官方价为内置近似值，可反馈校正。</div>`;
+}
+
+function showError(msg) {
+  const res = document.getElementById('result');
+  res.className = 'result err';
+  res.innerHTML = `<div class="verdict err">❌ 出错</div><div class="note">${escapeHtml(msg)}</div>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
