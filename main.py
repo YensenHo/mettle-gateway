@@ -1,5 +1,5 @@
 """
-机器支付网关 (人民币版 x402) — M1 原型
+Mettle Gateway (人民币版 x402) — M1 原型
 计量层不碰钱：网关做「计量 + 402握手 + 对账」，钱走微信/支付宝直连工具开发者。
 
 核心流程：
@@ -17,7 +17,7 @@ import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "gateway.db")
 
-app = FastAPI(title="机器支付网关 (人民币版 x402)", version="0.1.0-m1")
+app = FastAPI(title="Mettle Gateway (人民币版 x402)", version="0.1.0-m1")
 
 
 # ── 数据库 ─────────────────────────────────────────
@@ -287,7 +287,7 @@ def root():
     index = os.path.join(os.path.dirname(__file__), "static", "index.html")
     if os.path.exists(index):
         return FileResponse(index)
-    return {"name": "机器支付网关", "docs": "/docs"}
+    return {"name": "Mettle Gateway", "docs": "/docs"}
 
 
 init_db()
