@@ -16,8 +16,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
 .card h2{font-size:15px;font-weight:600;color:#94a3b8;margin-bottom:16px;letter-spacing:0.3px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;color:#64748b;margin-bottom:5px}
-.field input{width:100%;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:10px 12px;color:#e0e6ed;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;outline:none;transition:border .15s}
-.field input:focus{border-color:#3b82f6}
+.field input,.field select{width:100%;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:10px 12px;color:#e0e6ed;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;outline:none;transition:border .15s}
+.field input:focus,.field select:focus{border-color:#3b82f6}
 .field .hint{font-size:11px;color:#475569;margin-top:4px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .btn{width:100%;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
@@ -80,9 +80,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
       </div>
     </div>
     <div class="field">
-      <label>余额币种汇率</label>
-      <input id="fx" value="1.0" placeholder="1.0">
-      <div class="hint">余额是美元填 1.0，人民币填 7.2</div>
+      <label>余额币种</label>
+      <select id="fx">
+        <option value="1.0">美元 (USD)</option>
+        <option value="7.2">人民币 (CNY)</option>
+      </select>
+    </div>
+    <div class="row">
+      <div class="field">
+        <label>官方输入价 USD/1M（可选）</label>
+        <input id="priceInput" placeholder="留空自动查价目表">
+        <div class="hint">价目表为近似值，填了可覆盖</div>
+      </div>
+      <div class="field">
+        <label>官方输出价 USD/1M（可选）</label>
+        <input id="priceOutput" placeholder="留空自动查价目表">
+      </div>
     </div>
     <button class="btn" id="runBtn" onclick="runProbe()">验证</button>
   </div>
@@ -107,6 +120,9 @@ async function runProbe() {
     after: parseFloat(document.getElementById('after').value),
     fx: parseFloat(document.getElementById('fx').value) || 1.0,
   };
+  const pi = parseFloat(document.getElementById('priceInput').value);
+  const po = parseFloat(document.getElementById('priceOutput').value);
+  if (!isNaN(pi) && !isNaN(po)) { body.price_input = pi; body.price_output = po; }
   if (!body.base_url || !body.api_key || !body.model || isNaN(body.before) || isNaN(body.after)) {
     showError('请填写完整：base_url、api_key、model、前后余额');
     return;
