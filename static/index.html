@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>机器支付网关 · 人民币版 x402</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0e14;color:#e0e6ed;min-height:100vh}
+.header{background:#0f1520;border-bottom:1px solid #1c2533;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100}
+.header h1{font-size:18px;background:linear-gradient(135deg,#00b4d8,#48cae4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header .sub{color:#64748b;font-size:12px}
+.container{max-width:1100px;margin:0 auto;padding:24px}
+.card{background:#111827;border:1px solid #1c2533;border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{font-size:15px;margin-bottom:14px;color:#48cae4}
+.card h3{font-size:13px;margin-bottom:10px;color:#94a3b8}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-group{margin-bottom:10px}
+.form-group label{display:block;font-size:12px;color:#94a3b8;margin-bottom:4px}
+.form-group input,.form-group select{width:100%;padding:9px 12px;background:#0a0e14;border:1px solid #1c2533;border-radius:8px;color:#e0e6ed;font-size:13px}
+.form-group input:focus{border-color:#00b4d8;outline:none}
+.btn{padding:9px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all .2s}
+.btn-primary{background:#00b4d8;color:#001;color:#fff}
+.btn-primary:hover{background:#0096c7}
+.btn-outline{background:transparent;border:1px solid #1c2533;color:#94a3b8}
+.btn-outline:hover{border-color:#00b4d8;color:#00b4d8}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;text-align:left;font-size:12.5px;border-bottom:1px solid #1c2533}
+th{color:#64748b;font-weight:600}
+tr:hover{background:#0f1520}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge-green{background:#052e16;color:#4ade80}
+.badge-red{background:#450a0a;color:#f87171}
+.badge-blue{background:#082f49;color:#38bdf8}
+.badge-yellow{background:#422006;color:#fbbf24}
+.toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;z-index:1000;animation:slideIn .3s}
+.toast-success{background:#052e16;color:#4ade80;border:1px solid #166534}
+.toast-error{background:#450a0a;color:#f87171;border:1px solid #7f1d1d}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.stat-card{background:#111827;border:1px solid #1c2533;border-radius:12px;padding:16px;text-align:center}
+.stat-card .label{font-size:11px;color:#64748b}
+.stat-card .value{font-size:24px;font-weight:700;margin-top:4px}
+.stat-card .value.cyan{color:#48cae4}
+.section-title{font-size:13px;color:#48cae4;padding:12px 0 8px;border-bottom:1px solid #1c2533;margin-bottom:10px}
+.mono{font-family:monospace;font-size:11px;color:#64748b;word-break:break-all}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>⚡ 机器支付网关 <span style="font-size:12px;color:#64748b">· 人民币版 x402</span></h1>
+  <div class="sub">计量层不碰钱 · 钱走微信/支付宝直连工具开发者</div>
+</div>
+
+<div class="container">
+  <div class="stats" id="statsRow"></div>
+
+  <!-- 开发者 + Agent 注册 -->
+  <div class="grid2">
+    <div class="card">
+      <h2>👤 注册工具开发者</h2>
+      <div class="form-group"><label>开发者名称</label><input id="devName" placeholder="如：张三的数据服务"></div>
+      <div class="form-group"><label>微信/支付宝收款账号（月结用）</label><input id="devPay" placeholder="选填"></div>
+      <button class="btn btn-primary" onclick="createDev()">注册开发者</button>
+      <div id="devList" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h2>🤖 注册 Agent（虚拟额度）</h2>
+      <div class="form-group"><label>Agent 名称</label><input id="agentName" placeholder="如：我的 AI 助手"></div>
+      <div class="form-group"><label>初始虚拟额度（分）</label><input id="agentBalance" type="number" value="1000" placeholder="1000"></div>
+      <button class="btn btn-primary" onclick="createAgent()">注册 Agent</button>
+      <div id="agentList" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- 工具注册 -->
+  <div class="card">
+    <h2>🔧 注册工具（MCP 端点 + 计费规则）</h2>
+    <div class="grid2">
+      <div>
+        <div class="form-group"><label>开发者</label><select id="toolDev"></select></div>
+        <div class="form-group"><label>工具名称</label><input id="toolName" placeholder="如：天气查询"></div>
+        <div class="form-group"><label>描述</label><input id="toolDesc" placeholder="选填"></div>
+        <div class="form-group"><label>MCP 端点</label><input id="toolEndpoint" placeholder="选填，如 /mcp/weather"></div>
+      </div>
+      <div>
+        <div class="form-group"><label>计费模式</label>
+          <select id="toolMode">
+            <option value="per_call">按次收费</option>
+            <option value="per_token">按 token 收费（每1k token）</option>
+            <option value="per_month">按月收费</option>
+          </select>
+        </div>
+        <div class="form-group"><label>单价（分）</label><input id="toolPrice" type="number" value="1" placeholder="每次/每1k token/每月 的价（分）"></div>
+        <button class="btn btn-primary" style="margin-top:10px" onclick="createTool()">注册工具</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工具市场 + 调用测试 -->
+  <div class="card">
+    <h2>📦 工具市场（模拟 Agent 调用，测试 402 握手）</h2>
+    <table>
+      <thead><tr><th>工具</th><th>开发者</th><th>计费模式</th><th>单价</th><th>操作</th></tr></thead>
+      <tbody id="toolBody"></tbody>
+    </table>
+  </div>
+
+  <!-- 调用记录 + 账单 -->
+  <div class="grid2">
+    <div class="card">
+      <h2>📊 调用记录（计量）</h2>
+      <table><thead><tr><th>工具</th><th>Agent</th><th>金额</th><th>时间</th></tr></thead>
+      <tbody id="usageBody"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>💰 月结账单（网关只出账，钱走微信/支付宝）</h2>
+      <table><thead><tr><th>开发者</th><th>调用次数</th><th>应收(元)</th></tr></thead>
+      <tbody id="billingBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const API='';
+let devs=[],agents=[],tools=[];
+
+function toast(msg,type='success'){
+  const t=document.createElement('div');t.className=`toast toast-${type}`;t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
+async function api(path,opts={}){
+  const h={'Content-Type':'application/json'};
+  const r=await fetch(API+path,{...opts,headers:h});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(d.detail||'请求失败');
+  return d;
+}
+async function apiSafe(path,opts={}){try{return await api(path,opts)}catch(e){return null}}
+
+async function refreshAll(){
+  await Promise.all([loadDevs(),loadAgents(),loadTools(),loadUsage(),loadBilling(),loadStats()]);
+}
+
+async function loadDevs(){
+  devs=await apiSafe('/api/v1/developers')||[];
+  document.getElementById('devList').innerHTML=devs.map(d=>`<div style="padding:6px;font-size:12px;border-bottom:1px solid #1c2533"><strong>${d.name}</strong> <span class="mono">${d.id.slice(0,8)}</span></div>`).join('')||'<div style="color:#64748b;font-size:12px">暂无</div>';
+  const sel=document.getElementById('toolDev');
+  sel.innerHTML=devs.map(d=>`<option value="${d.id}">${d.name}</option>`).join('')||'<option value="">请先注册开发者</option>';
+}
+
+async function loadAgents(){
+  agents=await apiSafe('/api/v1/agents')||[];
+  document.getElementById('agentList').innerHTML=agents.map(a=>`<div style="padding:6px;font-size:12px;border-bottom:1px solid #1c2533;display:flex;justify-content:space-between"><strong>${a.name}</strong><span style="color:#4ade80">¥${(a.balance_cents/100).toFixed(2)}</span></div>`).join('')||'<div style="color:#64748b;font-size:12px">暂无</div>';
+}
+
+async function loadTools(){
+  tools=await apiSafe('/api/v1/tools')||[];
+  const modeLabel={per_call:'按次',per_token:'按token',per_month:'按月'};
+  document.getElementById('toolBody').innerHTML=tools.map(t=>{
+    const agentsOpts=agents.map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+    return `<tr>
+      <td><strong>${t.name}</strong><div class="mono">${t.mcp_endpoint||''}</div></td>
+      <td>${t.developer_name}</td>
+      <td><span class="badge badge-blue">${modeLabel[t.billing_mode]}</span></td>
+      <td>¥${(t.price_cents/100).toFixed(2)}</td>
+      <td>
+        <select id="invokeAgent_${t.id}" style="background:#0a0e14;border:1px solid #1c2533;color:#e0e6ed;border-radius:6px;padding:4px;font-size:11px">${agentsOpts}</select>
+        <button class="btn btn-outline" style="padding:4px 8px;font-size:11px" onclick="invokeTool('${t.id}')">调用</button>
+      </td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="5" style="text-align:center;color:#64748b">暂无工具，请先注册</td></tr>';
+}
+
+async function loadUsage(){
+  const list=await apiSafe('/api/v1/usage')||[];
+  document.getElementById('usageBody').innerHTML=list.map(u=>`<tr><td>${u.tool_name}</td><td>${u.agent_name}</td><td>¥${(u.amount_cents/100).toFixed(2)}</td><td class="mono">${u.created_at.slice(11,19)}</td></tr>`).join('')||'<tr><td colspan="4" style="text-align:center;color:#64748b">暂无</td></tr>';
+}
+
+async function loadBilling(){
+  const list=await apiSafe('/api/v1/billing')||[];
+  document.getElementById('billingBody').innerHTML=list.map(b=>`<tr><td>${b.developer_name}</td><td>${b.call_count}</td><td style="color:#fbbf24">¥${b.total_yuan}</td></tr>`).join('')||'<tr><td colspan="3" style="text-align:center;color:#64748b">暂无</td></tr>';
+}
+
+async function loadStats(){
+  const usage=await apiSafe('/api/v1/usage')||[];
+  const billing=await apiSafe('/api/v1/billing')||[];
+  const totalCalls=usage.length;
+  const totalYuan=billing.reduce((s,b)=>s+b.total_cents,0)/100;
+  document.getElementById('statsRow').innerHTML=`
+    <div class="stat-card"><div class="label">工具数</div><div class="value cyan">${tools.length}</div></div>
+    <div class="stat-card"><div class="label">Agent 数</div><div class="value cyan">${agents.length}</div></div>
+    <div class="stat-card"><div class="label">总调用次数</div><div class="value cyan">${totalCalls}</div></div>
+    <div class="stat-card"><div class="label">累计计费(元)</div><div class="value cyan">¥${totalYuan.toFixed(2)}</div></div>`;
+}
+
+async function createDev(){
+  const name=document.getElementById('devName').value;
+  const wechat_pay=document.getElementById('devPay').value;
+  if(!name) return toast('请填开发者名称','error');
+  try{await api('/api/v1/developers',{method:'POST',body:JSON.stringify({name,wechat_pay})});toast('开发者注册成功');refreshAll();}
+  catch(e){toast(e.message,'error')}
+}
+
+async function createAgent(){
+  const name=document.getElementById('agentName').value;
+  const balance_cents=parseInt(document.getElementById('agentBalance').value)||0;
+  if(!name) return toast('请填 Agent 名称','error');
+  try{await api('/api/v1/agents',{method:'POST',body:JSON.stringify({name,balance_cents})});toast('Agent 注册成功');refreshAll();}
+  catch(e){toast(e.message,'error')}
+}
+
+async function createTool(){
+  const developer_id=document.getElementById('toolDev').value;
+  const name=document.getElementById('toolName').value;
+  const description=document.getElementById('toolDesc').value;
+  const mcp_endpoint=document.getElementById('toolEndpoint').value;
+  const billing_mode=document.getElementById('toolMode').value;
+  const price_cents=parseInt(document.getElementById('toolPrice').value)||0;
+  if(!developer_id) return toast('请先注册开发者','error');
+  if(!name||!price_cents) return toast('请填工具名称和单价','error');
+  try{await api('/api/v1/tools',{method:'POST',body:JSON.stringify({developer_id,name,description,mcp_endpoint,billing_mode,price_cents})});toast('工具注册成功');refreshAll();}
+  catch(e){toast(e.message,'error')}
+}
+
+async function invokeTool(toolId){
+  const sel=document.getElementById(`invokeAgent_${toolId}`);
+  const agent_id=sel?sel.value:'';
+  if(!agent_id) return toast('请先注册 Agent','error');
+  try{
+    const r=await api(`/api/v1/tools/${toolId}/invoke`,{method:'POST',body:JSON.stringify({agent_id,tokens:2000})});
+    toast(`调用成功 · 扣费 ¥${(r.amount_cents/100).toFixed(2)} · 剩余 ¥${(r.agent_balance_cents/100).toFixed(2)}`);
+    refreshAll();
+  }catch(e){
+    // 402 错误也刷新（额度不足）
+    toast(e.message,'error');
+    refreshAll();
+  }
+}
+
+refreshAll();
+</script>
+</body>
+</html>
