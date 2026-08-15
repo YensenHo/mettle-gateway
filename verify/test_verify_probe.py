@@ -97,6 +97,25 @@ class TestRunProbe(unittest.TestCase):
         )
         self.assertIn("error", result)
 
+    def test_ssrf_http_blocked(self):
+        """P0-2: 拒绝 http（明文）"""
+        result = verify_probe.run_probe("http://evil.com/v1", "sk", "gpt-4o", 1.0, 10, 9)
+        self.assertIn("error", result)
+        self.assertIn("https", result["error"])
+
+    def test_ssrf_private_host_blocked(self):
+        """P0-2: 拒绝内网/本地地址"""
+        for bad in ["https://127.0.0.1/v1", "https://192.168.1.1/v1",
+                    "https://localhost/v1", "https://169.254.169.254/v1"]:
+            result = verify_probe.run_probe(bad, "sk", "gpt-4o", 1.0, 10, 9)
+            self.assertIn("error", result, f"{bad} 应被拦截")
+
+    def test_negative_balance_blocked(self):
+        """P0-3: after > before 负扣费拦截"""
+        result = verify_probe.run_probe("https://www.cun.ai/v1", "sk", "gpt-4o", 1.0, before=10, after=11)
+        self.assertIn("error", result)
+        self.assertIn("填反", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

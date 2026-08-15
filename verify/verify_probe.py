@@ -17,8 +17,10 @@ import json
 import ssl
 import sys
 import time
+import ipaddress
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 # ── 官方价目表：每百万 token 的 USD 价格（近似值，可用 --prices 指定 JSON 文件覆盖）──
 DEFAULT_PRICES = {
@@ -36,7 +38,7 @@ DEFAULT_PRICES = {
 
 # 标准探针 prompt：固定输入，输出长度可复现（max_tokens 封顶）
 PROBE_PROMPT = "请用一句话介绍你自己，然后从 1 数到 20。"
-PROBE_MAX_TOKENS = 200
+PROBE_MAX_TOKENS = 1500
 
 FX_CNY_PER_USD = 7.2  # 默认汇率
 
@@ -71,6 +73,16 @@ def normalize_base_url(base_url):
     return url + "/v1/chat/completions"
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """禁止跟随重定向：防止 302 跨主机时把 Authorization 泄露给第三方。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(NoRedirect)
+
+
 def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, retries: int = 5) -> tuple[int | None, dict]:
     data = json.dumps(payload).encode("utf-8")
     last_err = None
@@ -80,10 +92,12 @@ def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, ret
             req.add_header("Content-Type", "application/json")
             req.add_header("Authorization", f"Bearer {api_key}")
             req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
                 return resp.status, json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
+            if e.code in (301, 302, 303, 307, 308):  # 重定向被拒绝，防止 key 泄露
+                return e.code, {"error": f"中转站返回重定向({e.code})，已拒绝跟随以防 key 泄露"}
             if e.code in (401, 404):  # 明确失败不重试
                 return e.code, {"error": body[:500]}
             last_err = e  # 403 等可能是 GFW 间歇干扰，重试
@@ -94,9 +108,32 @@ def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, ret
 
 
 # ── 主流程 ─────────────────────────────────────────────
+def _is_private_or_local(host: str) -> bool:
+    """判断 host 是否本地/内网地址（SSRF 防护）"""
+    host = host.lower()
+    if host in ("localhost", "0.0.0.0", "::1"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast
+    except ValueError:
+        return False  # 域名放行（DNS rebinding 风险 MVP 阶段暂不处理）
+
+
 def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: float,
               after: float, fx: float = FX_CNY_PER_USD, prices: dict | None = None,
               timeout: int = 60) -> dict:
+    # SSRF 防护：只允许 https，拒绝本地/内网地址
+    parsed = urlparse(base_url)
+    if parsed.scheme != "https":
+        return {"error": "base_url 必须使用 https"}
+    if _is_private_or_local(parsed.hostname or ""):
+        return {"error": "base_url 不能指向本地/内网地址"}
+
+    # 前后余额校验：after 不能大于 before（否则负扣费误判）
+    if after > before:
+        return {"error": f"调用后余额({after})大于调用前余额({before})，请检查是否填反"}
+
     prices = prices or DEFAULT_PRICES
     price = prices.get(model)
     if price is None:
@@ -122,8 +159,11 @@ def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: flo
     reasonable = compute_reasonable_cost(price, prompt_tokens, completion_tokens, ratio, fx)
     actual = before - after
     level, note = judge(actual, reasonable)
-    if reasonable < 0.05:  # 单次扣费太小，余额显示精度可能放大误差
-        note += "（⚠️ 单次扣费过小，余额显示精度可能放大误差，建议发更大请求或多次累计）"
+    if reasonable < 0.01:  # 扣费小于余额显示精度，对照法完全不可靠
+        level = "UNKNOWN"
+        note = f"单次扣费({reasonable:.4f})小于余额显示精度(0.01)，无法可靠判定。建议发更大请求或多次调用累计后再测。"
+    elif reasonable < 0.05:  # 5 倍精度内，可能被四舍五入放大
+        note += "（⚠️ 单次扣费偏小，余额显示精度可能放大误差，建议发更大请求或多次累计）"
 
     return {
         "model": model,
