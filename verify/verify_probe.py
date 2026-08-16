@@ -14,10 +14,11 @@ Mettle Verify — 余额真实性验证探针 (V1)
 """
 import argparse
 import json
+import ipaddress
+import socket
 import ssl
 import sys
 import time
-import ipaddress
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -36,12 +37,10 @@ DEFAULT_PRICES = {
     "glm-4-plus": {"input": 0.70, "output": 1.40},
 }
 
-# 标准探针 prompt：要求模型输出长文，确保产生足够 token 让扣费达到可测级别
-PROBE_PROMPT = (
-    "请写一篇中文文章，主题是「人工智能的发展历程与未来趋势」，"
-    "要求至少 800 字，分 5 个以上段落详细阐述，内容要具体、有信息量，避免空话。"
-)
-PROBE_MAX_TOKENS = 1500
+# 标准探针 prompt：强制长且可复现的输出（1000 个数字 ≈ 1500-2000 token），
+# 确保单次扣费达到余额显示精度(0.01)的可靠可测级别
+PROBE_PROMPT = "请从 1 开始，每行输出一个数字，一直数到 1000，不要跳过任何数字，只输出数字和换行。"
+PROBE_MAX_TOKENS = 2000
 
 FX_CNY_PER_USD = 7.2  # 默认汇率
 
@@ -96,7 +95,11 @@ def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, ret
             req.add_header("Authorization", f"Bearer {api_key}")
             req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
             with _NO_REDIRECT_OPENER.open(req, timeout=timeout) as resp:
-                return resp.status, json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8", "replace")
+                try:
+                    return resp.status, json.loads(raw)
+                except json.JSONDecodeError:
+                    return resp.status, {"error": f"非 JSON 响应: {raw[:200]}"}
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
             if e.code in (301, 302, 303, 307, 308):  # 重定向被拒绝，防止 key 泄露
@@ -112,20 +115,33 @@ def http_post_json(url: str, payload: dict, api_key: str, timeout: int = 60, ret
 
 # ── 主流程 ─────────────────────────────────────────────
 def _is_private_or_local(host: str) -> bool:
-    """判断 host 是否本地/内网地址（SSRF 防护）"""
-    host = host.lower()
+    """判断 host 是否本地/内网地址（SSRF 防护）。覆盖标准 IP、非标准 IP 表示、域名解析。"""
+    host = host.lower().strip()
     if host in ("localhost", "0.0.0.0", "::1"):
         return True
+    # 标准 IP 表示（含 IPv4/IPv6）
     try:
         ip = ipaddress.ip_address(host)
         return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast
     except ValueError:
-        return False  # 域名放行（DNS rebinding 风险 MVP 阶段暂不处理）
+        pass
+    # 非标准 IP 表示（0x7f000001 / 2130706433 / 127.1）与域名（nip.io / localtest.me）：
+    # 用 socket 真实解析，校验每个解析结果
+    try:
+        infos = socket.getaddrinfo(host, None)
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return True
+    except (socket.gaierror, OSError, ValueError):
+        return False  # 解析失败 = 连不上，不构成 SSRF，放行
+    return False
 
 
-def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: float,
-              after: float, fx: float = FX_CNY_PER_USD, prices: dict | None = None,
-              timeout: int = 60) -> dict:
+def send_probe(base_url: str, api_key: str, model: str, ratio: float,
+               fx: float = FX_CNY_PER_USD, prices: dict | None = None,
+               timeout: int = 60) -> dict:
+    """第一步：发探针请求，返回 usage/价格信息（不判定）。用于两步式交互。"""
     # SSRF 防护：只允许 https，拒绝本地/内网地址
     parsed = urlparse(base_url)
     if parsed.scheme != "https":
@@ -133,17 +149,10 @@ def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: flo
     if _is_private_or_local(parsed.hostname or ""):
         return {"error": "base_url 不能指向本地/内网地址"}
 
-    # 前后余额校验：after 不能大于 before（否则负扣费误判）
-    if after > before:
-        return {"error": f"调用后余额({after})大于调用前余额({before})，请检查是否填反"}
-
     prices = prices or DEFAULT_PRICES
     price = prices.get(model)
     if price is None:
-        return {
-            "error": f"模型 '{model}' 不在内置价目表。请用 --price-input/--price-output 指定官方价，"
-                     f"或用 --prices prices.json 提供价目表。",
-        }
+        return {"error": f"模型 '{model}' 不在内置价目表。请手动指定官方价或反馈补充价目表。"}
 
     url = normalize_base_url(base_url)
     payload = {
@@ -156,8 +165,28 @@ def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: flo
         return {"error": f"探针请求失败 (HTTP {status}): {resp.get('error', resp)}"}
 
     usage = resp.get("usage", {})
-    prompt_tokens = usage.get("prompt_tokens", 0)
-    completion_tokens = usage.get("completion_tokens", 0)
+    return {
+        "model": model,
+        "http_status": status,
+        "usage": usage,
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "official_price_usd_per_1m": price,
+        "claimed_ratio": ratio,
+        "fx_cny_per_usd": fx,
+    }
+
+
+def judge_probe(probe_result: dict, before: float, after: float) -> dict:
+    """第二步：用第一步的探针结果 + 前后余额算对照法判定。"""
+    if after > before:
+        return {"error": f"调用后余额({after})大于调用前余额({before})，请检查是否填反"}
+
+    price = probe_result["official_price_usd_per_1m"]
+    prompt_tokens = probe_result["prompt_tokens"]
+    completion_tokens = probe_result["completion_tokens"]
+    ratio = probe_result["claimed_ratio"]
+    fx = probe_result["fx_cny_per_usd"]
 
     reasonable = compute_reasonable_cost(price, prompt_tokens, completion_tokens, ratio, fx)
     actual = before - after
@@ -168,22 +197,26 @@ def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: flo
     elif reasonable < 0.05:  # 5 倍精度内，可能被四舍五入放大
         note += "（⚠️ 单次扣费偏小，余额显示精度可能放大误差，建议发更大请求或多次累计）"
 
-    return {
-        "model": model,
-        "http_status": status,
-        "usage": usage,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "official_price_usd_per_1m": price,
-        "claimed_ratio": ratio,
-        "fx_cny_per_usd": fx,
+    result = dict(probe_result)
+    result.update({
         "reasonable_cost_cny": round(reasonable, 4),
         "actual_cost_cny": round(actual, 4),
         "before_cny": before,
         "after_cny": after,
         "judge_level": level,
         "judge_note": note,
-    }
+    })
+    return result
+
+
+def run_probe(base_url: str, api_key: str, model: str, ratio: float, before: float,
+              after: float, fx: float = FX_CNY_PER_USD, prices: dict | None = None,
+              timeout: int = 60) -> dict:
+    """便捷组合（CLI 用）：发探针 + 判定。Web 请用 send_probe/judge_probe 两步式。"""
+    probe_result = send_probe(base_url, api_key, model, ratio, fx=fx, prices=prices, timeout=timeout)
+    if "error" in probe_result:
+        return probe_result
+    return judge_probe(probe_result, before, after)
 
 
 def main():

@@ -111,10 +111,47 @@ class TestRunProbe(unittest.TestCase):
             self.assertIn("error", result, f"{bad} 应被拦截")
 
     def test_negative_balance_blocked(self):
-        """P0-3: after > before 负扣费拦截"""
-        result = verify_probe.run_probe("https://www.cun.ai/v1", "sk", "gpt-4o", 1.0, before=10, after=11)
+        """P0-3: after > before 负扣费拦截（judge_probe 层校验）"""
+        probe_result = {
+            "model": "gpt-4o",
+            "prompt_tokens": 23,
+            "completion_tokens": 76,
+            "official_price_usd_per_1m": {"input": 2.5, "output": 10.0},
+            "claimed_ratio": 1.0,
+            "fx_cny_per_usd": 1.0,
+        }
+        result = verify_probe.judge_probe(probe_result, before=10, after=11)
         self.assertIn("error", result)
         self.assertIn("填反", result["error"])
+
+    def test_no_redirect_rejected(self):
+        """P0-1: 302 重定向被拒绝(防 key 泄露)"""
+        from urllib.error import HTTPError
+        from email.message import Message
+        import io
+        def raise_302(*a, **k):
+            raise HTTPError("http://x", 302, "Found", Message(), io.BytesIO(b""))
+        with patch.object(verify_probe._NO_REDIRECT_OPENER, "open", side_effect=raise_302), \
+             patch("time.sleep", return_value=None):
+            status, resp = verify_probe.http_post_json("http://x/v1/chat/completions", {"a": 1}, "sk", retries=1)
+        self.assertEqual(status, 302)
+        self.assertIn("重定向", resp["error"])
+
+    def test_precision_unknown(self):
+        """P1: reasonable < 0.01 → UNKNOWN(精度不足不误判)"""
+        probe_result = {
+            "model": "gpt-4o", "prompt_tokens": 23, "completion_tokens": 76,
+            "official_price_usd_per_1m": {"input": 2.5, "output": 10.0},
+            "claimed_ratio": 1.0, "fx_cny_per_usd": 1.0,
+        }
+        r = verify_probe.judge_probe(probe_result, before=2.99, after=2.98)
+        self.assertEqual(r["judge_level"], "UNKNOWN")
+
+    def test_ssrf_nonstandard_ip_blocked(self):
+        """P0-3: 非标准 IP 表示被拦截"""
+        for bad in ["https://2130706433/v1", "https://0x7f000001/v1"]:
+            r = verify_probe.run_probe(bad, "sk", "gpt-4o", 1.0, 10, 9)
+            self.assertIn("error", r, f"{bad} 应被拦截")
 
 
 if __name__ == "__main__":

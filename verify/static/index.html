@@ -8,12 +8,13 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;background:#0a0e14;color:#e0e6ed;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:32px 16px}
 .wrap{width:100%;max-width:640px}
-.header{text-align:center;margin-bottom:28px}
+.header{text-align:center;margin-bottom:24px}
 .header h1{font-size:26px;font-weight:700;letter-spacing:-0.5px}
 .header h1 .bolt{color:#fbbf24}
 .header .sub{color:#64748b;font-size:13px;margin-top:6px}
 .card{background:#111827;border:1px solid #1f2937;border-radius:14px;padding:24px;margin-bottom:16px}
-.card h2{font-size:15px;font-weight:600;color:#94a3b8;margin-bottom:16px;letter-spacing:0.3px}
+.card h2{font-size:15px;font-weight:600;color:#94a3b8;margin-bottom:6px;letter-spacing:0.3px}
+.card .step-hint{font-size:12px;color:#64748b;margin-bottom:16px;line-height:1.5}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;color:#64748b;margin-bottom:5px}
 .field input,.field select{width:100%;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:10px 12px;color:#e0e6ed;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;outline:none;transition:border .15s}
@@ -23,16 +24,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
 .btn{width:100%;background:linear-gradient(135deg,#3b82f6,#6366f1);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:opacity .15s}
 .btn:hover{opacity:.92}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.secondary{background:#1f2937;color:#cbd5e1}
+.probe-info{display:none;background:#0b1220;border:1px solid #1f2937;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;color:#94a3b8;line-height:1.6}
 .result{display:none;border-radius:14px;padding:22px;margin-bottom:16px}
 .result.ok{display:block;background:#0c1a12;border:1px solid #14532d}
 .result.warn{display:block;background:#1a1408;border:1px solid #713f12}
 .result.fail{display:block;background:#1a0c0e;border:1px solid #7f1d1d}
 .result.err{display:block;background:#131313;border:1px solid #3f3f46}
+.result.unknown{display:block;background:#131a24;border:1px solid #1e3a5f}
 .result .verdict{font-size:20px;font-weight:700;margin-bottom:10px}
 .result .verdict.ok{color:#4ade80}
 .result .verdict.warn{color:#fbbf24}
 .result .verdict.fail{color:#f87171}
 .result .verdict.err{color:#a1a1aa}
+.result .verdict.unknown{color:#93c5fd}
 .result table{width:100%;border-collapse:collapse;font-size:13px}
 .result td{padding:7px 4px;border-bottom:1px solid #1f2937;color:#94a3b8}
 .result td:last-child{text-align:right;color:#e0e6ed;font-family:ui-monospace,monospace}
@@ -48,8 +53,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
     <div class="sub">中转站余额真实性验证 · 检测是否「余额虚标 / 倍率造假 / 偷偷多扣」</div>
   </div>
 
-  <div class="card">
-    <h2>🔍 验证你的中转站 key</h2>
+  <!-- Step 1: 发探针 -->
+  <div class="card" id="step1">
+    <h2>① 填写中转站信息，发探针</h2>
+    <div class="step-hint">先记下你中转站当前的余额（调用前余额），填好后点「发探针」。探针会发一次标准请求，然后你去中转站看扣了多少钱。</div>
     <div class="field">
       <label>中转站 API 地址 (base_url)</label>
       <input id="baseUrl" placeholder="https://www.cun.ai/v1">
@@ -71,33 +78,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
     </div>
     <div class="row">
       <div class="field">
-        <label>调用前余额</label>
-        <input id="before" placeholder="2.99">
+        <label>余额币种</label>
+        <select id="fx">
+          <option value="1.0">美元 (USD)</option>
+          <option value="7.2">人民币 (CNY)</option>
+        </select>
       </div>
       <div class="field">
-        <label>调用后余额</label>
-        <input id="after" placeholder="2.98">
+        <label>调用前余额</label>
+        <input id="before" placeholder="2.99">
+        <div class="hint">发探针前先去中转站抄的余额</div>
       </div>
-    </div>
-    <div class="field">
-      <label>余额币种</label>
-      <select id="fx">
-        <option value="1.0">美元 (USD)</option>
-        <option value="7.2">人民币 (CNY)</option>
-      </select>
     </div>
     <div class="row">
       <div class="field">
         <label>官方输入价 USD/1M（可选）</label>
         <input id="priceInput" placeholder="留空自动查价目表">
-        <div class="hint">价目表为近似值，填了可覆盖</div>
       </div>
       <div class="field">
         <label>官方输出价 USD/1M（可选）</label>
         <input id="priceOutput" placeholder="留空自动查价目表">
       </div>
     </div>
-    <button class="btn" id="runBtn" onclick="runProbe()">验证</button>
+    <button class="btn" id="sendBtn" onclick="sendProbe()">发探针</button>
+  </div>
+
+  <!-- Step 2: 判定 -->
+  <div class="card" id="step2" style="display:none">
+    <h2>② 去中转站查新余额，回来判定</h2>
+    <div class="step-hint">探针已发出。现在去你的中转站后台看最新余额，填进「调用后余额」，点「判定」。</div>
+    <div class="probe-info" id="probeInfo"></div>
+    <div class="field">
+      <label>调用后余额</label>
+      <input id="after" placeholder="例如 2.98">
+      <div class="hint">发探针后在中转站看到的最新余额</div>
+    </div>
+    <button class="btn" id="judgeBtn" onclick="judgeProbe()">判定</button>
+    <button class="btn secondary" style="margin-top:8px" onclick="resetStep()">← 重新发探针</button>
   </div>
 
   <div class="result" id="result"></div>
@@ -108,60 +125,84 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
 </div>
 
 <script>
-async function runProbe() {
-  const btn = document.getElementById('runBtn');
-  const res = document.getElementById('result');
+let sessionId = null;
+let fxValue = 1.0;
+
+function unit() { return fxValue === 1.0 ? '$' : '¥'; }
+
+async function sendProbe() {
   const body = {
     base_url: document.getElementById('baseUrl').value.trim(),
     api_key: document.getElementById('apiKey').value.trim(),
     model: document.getElementById('model').value.trim(),
     ratio: parseFloat(document.getElementById('ratio').value) || 1.0,
-    before: parseFloat(document.getElementById('before').value),
-    after: parseFloat(document.getElementById('after').value),
     fx: parseFloat(document.getElementById('fx').value) || 1.0,
   };
+  const before = parseFloat(document.getElementById('before').value);
   const pi = parseFloat(document.getElementById('priceInput').value);
   const po = parseFloat(document.getElementById('priceOutput').value);
   if (!isNaN(pi) && !isNaN(po)) { body.price_input = pi; body.price_output = po; }
-  if (!body.base_url || !body.api_key || !body.model || isNaN(body.before) || isNaN(body.after)) {
-    showError('请填写完整：base_url、api_key、model、前后余额');
+  if (isNaN(pi) !== isNaN(po)) { showError('官方价要两个都填，或都留空'); return; }
+  if (!body.base_url || !body.api_key || !body.model || isNaN(before)) {
+    showError('请填写完整：base_url、api_key、model、调用前余额');
     return;
   }
-  btn.disabled = true;
-  btn.textContent = '探测中...';
-  res.className = 'result';
-  res.style.display = 'none';
+  fxValue = body.fx;
+
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true; btn.textContent = '探测中...';
   try {
-    const r = await fetch('/api/v1/probe', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
+    const r = await fetch('/api/v1/probe/send', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     const data = await r.json();
-    renderResult(data, body.fx);
+    if (!r.ok || data.error) { showError(data.error || parseDetail(data)); return; }
+    sessionId = data.session_id;
+    document.getElementById('probeInfo').innerHTML =
+      `探针已发出 ✅ 消耗 <b>${data.prompt_tokens}</b> prompt + <b>${data.completion_tokens}</b> completion token（共 ${data.prompt_tokens + data.completion_tokens}）<br>` +
+      `模型 <b>${escapeHtml(data.model)}</b> · 宣称倍率 ${data.claimed_ratio}x · 官方价 ${data.official_price_usd_per_1m.input}/${data.official_price_usd_per_1m.output} USD/1M`;
+    document.getElementById('probeInfo').style.display = 'block';
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('result').style.display = 'none';
   } catch (e) {
     showError('请求失败：' + e.message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = '验证';
+    btn.disabled = false; btn.textContent = '发探针';
   }
 }
 
-function unit(fx) { return fx === 1.0 ? '$' : '¥'; }
-
-function renderResult(d, fx) {
-  const res = document.getElementById('result');
-  if (d.error) {
-    res.className = 'result err';
-    res.innerHTML = `<div class="verdict err">❌ 无法判定</div>
-      <div class="note">${escapeHtml(d.error)}</div>`;
-    return;
+async function judgeProbe() {
+  const after = parseFloat(document.getElementById('after').value);
+  const before = parseFloat(document.getElementById('before').value);
+  if (isNaN(after)) { showError('请填写调用后余额'); return; }
+  const btn = document.getElementById('judgeBtn');
+  btn.disabled = true; btn.textContent = '判定中...';
+  try {
+    const r = await fetch('/api/v1/probe/judge', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({session_id: sessionId, before: before, after: after})});
+    const data = await r.json();
+    if (!r.ok || data.error) { showError(data.error || parseDetail(data)); return; }
+    renderResult(data);
+  } catch (e) {
+    showError('请求失败：' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '判定';
   }
+}
+
+function resetStep() {
+  sessionId = null;
+  document.getElementById('step1').style.display = 'block';
+  document.getElementById('step2').style.display = 'none';
+  document.getElementById('result').style.display = 'none';
+  document.getElementById('after').value = '';
+}
+
+function renderResult(d) {
+  const res = document.getElementById('result');
   const level = d.judge_level;
   const icon = {OK:'✅', WARN:'⚠️', FAIL:'🔴', UNKNOWN:'❓'}[level] || '❓';
-  const cls = level === 'OK' ? 'ok' : level === 'WARN' ? 'warn' : level === 'FAIL' ? 'fail' : 'err';
+  const cls = {OK:'ok', WARN:'warn', FAIL:'fail', UNKNOWN:'unknown'}[level] || 'err';
   res.className = 'result ' + cls;
-  const u = unit(fx);
+  const u = unit();
   res.innerHTML = `
     <div class="verdict ${cls}">${icon} ${level} — ${escapeHtml(d.judge_note)}</div>
     <table>
@@ -178,6 +219,17 @@ function showError(msg) {
   const res = document.getElementById('result');
   res.className = 'result err';
   res.innerHTML = `<div class="verdict err">❌ 出错</div><div class="note">${escapeHtml(msg)}</div>`;
+}
+
+function parseDetail(data) {
+  // 解析 FastAPI 422 校验错误
+  if (data && data.detail) {
+    if (Array.isArray(data.detail)) {
+      return data.detail.map(x => `${x.loc.join('.')}: ${x.msg}`).join('；');
+    }
+    return String(data.detail);
+  }
+  return '未知错误';
 }
 
 function escapeHtml(s) {
