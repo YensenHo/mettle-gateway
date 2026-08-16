@@ -36,8 +36,11 @@ DEFAULT_PRICES = {
     "glm-4-plus": {"input": 0.70, "output": 1.40},
 }
 
-# 标准探针 prompt：固定输入，输出长度可复现（max_tokens 封顶）
-PROBE_PROMPT = "请用一句话介绍你自己，然后从 1 数到 20。"
+# 标准探针 prompt：要求模型输出长文，确保产生足够 token 让扣费达到可测级别
+PROBE_PROMPT = (
+    "请写一篇中文文章，主题是「人工智能的发展历程与未来趋势」，"
+    "要求至少 800 字，分 5 个以上段落详细阐述，内容要具体、有信息量，避免空话。"
+)
 PROBE_MAX_TOKENS = 1500
 
 FX_CNY_PER_USD = 7.2  # 默认汇率
