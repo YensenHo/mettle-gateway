@@ -9,11 +9,13 @@
 """
 import os
 import sys
+import time
 import uuid
+from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(__file__))  # 确保能 import verify_probe
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -23,6 +25,20 @@ app = FastAPI(title="Mettle Verify", version="0.1.0-mvp")
 
 # 内存缓存：session_id -> 探针结果（不含 key，只存 usage/价格/倍率/汇率）
 probe_cache: dict[str, dict] = {}
+
+# 简单内存限流：每 IP 每窗口最多 N 次请求（防公开部署被当 SSRF 盲探测代理滥用）
+_RATE_WINDOW = 60.0
+_RATE_LIMIT = 10
+_rate_store: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_rate(ip: str) -> bool:
+    now = time.time()
+    _rate_store[ip] = [t for t in _rate_store[ip] if now - t < _RATE_WINDOW]
+    if len(_rate_store[ip]) >= _RATE_LIMIT:
+        return False
+    _rate_store[ip].append(now)
+    return True
 
 
 class SendRequest(BaseModel):
@@ -42,8 +58,11 @@ class JudgeRequest(BaseModel):
 
 
 @app.post("/api/v1/probe/send")
-def send_probe(req: SendRequest):
+def send_probe(req: SendRequest, request: Request):
     """第一步：发探针请求，缓存 usage，返回 session_id + 探针信息"""
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate(ip):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
     prices = None
     if req.price_input and req.price_output:
         prices = {req.model: {"input": req.price_input, "output": req.price_output}}
@@ -64,8 +83,11 @@ def send_probe(req: SendRequest):
 
 
 @app.post("/api/v1/probe/judge")
-def judge_probe(req: JudgeRequest):
+def judge_probe(req: JudgeRequest, request: Request):
     """第二步：用缓存的探针结果 + 前后余额算判定"""
+    ip = request.client.host if request.client else "unknown"
+    if not _check_rate(ip):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
     cached = probe_cache.get(req.session_id)
     if cached is None:
         return {"error": "会话已过期或不存在，请重新发探针"}
